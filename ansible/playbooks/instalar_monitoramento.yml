@@ -1,0 +1,38 @@
+---
+- name: Instalar Windows Exporter em Lote (Todos os Ambientes)
+  hosts: all
+  gather_facts: no
+  
+  # Processa em lotes de 10 máquinas para segurança da rede
+  serial: 10
+  
+  # Timeout para conexões que demorem muito a responder
+  timeout: 20
+
+  tasks:
+    - name: Criar pasta temporaria para o instalador
+      ansible.windows.win_file:
+        path: 'C:\temp'
+        state: directory
+      ignore_errors: yes
+
+    - name: Copiar o instalador do Ansible para o Windows (Evita bloqueio de internet)
+      ansible.windows.win_copy:
+        src: 'windows_exporter.msi.msi'
+        dest: 'C:\temp\windows_exporter.msi'
+      ignore_errors: yes
+
+    - name: Instalar ou Atualizar Windows Exporter
+      ansible.windows.win_package:
+        path: 'C:\temp\windows_exporter.msi'
+        arguments: 'ENABLED_COLLECTORS="cpu,memory,logical_disk,os,system,updates"'
+        state: present
+      ignore_errors: yes
+
+    - name: Abrir porta 9182 no Firewall (Compativel com Windows 2008 ate 2025)
+      ansible.windows.win_shell: |
+        netsh advfirewall firewall show rule name="Prometheus Windows Exporter" >$null
+        if ($LASTEXITCODE -ne 0) {
+            netsh advfirewall firewall add rule name="Prometheus Windows Exporter" dir=in action=allow protocol=TCP localport=9182
+        }
+      ignore_errors: yes
