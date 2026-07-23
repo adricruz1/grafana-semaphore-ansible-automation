@@ -1,0 +1,57 @@
+---
+- name: Consultar Atualizações Pendentes do Windows
+  hosts: all
+  gather_facts: no
+  serial: 10  # Processa em lotes de 10 máquinas
+  max_fail_percentage: 30
+  tasks:
+    - name: Verificar se há patches pendentes com limite de tempo
+      ansible.windows.win_shell: |
+        try {
+            $job = Start-Job -ScriptBlock {
+                $updateSession = New-Object -ComObject Microsoft.Update.Session
+                $updateSearcher = $updateSession.CreateUpdateSearcher()
+                $searchResult = $updateSearcher.Search("IsInstalled=0 and Type='Software'")
+                
+                if ($searchResult.Updates.Count -gt 0) {
+                    [PSCustomObject]@{
+                        Status = "Pendentes"
+                        Count = $searchResult.Updates.Count
+                        Titles = @($searchResult.Updates | Select-Object -ExpandProperty Title)
+                    }
+                } else {
+                    [PSCustomObject]@{
+                        Status = "Atualizado"
+                        Count = 0
+                        Titles = @()
+                    }
+                }
+            }
+            
+            # Aguarda no máximo 45 segundos por servidor para não travar a fila
+            if (Wait-Job $job -Timeout 45) {
+                $result = Receive-Job $job
+                Remove-Job $job
+                if ($result.Status -eq "Pendentes") {
+                    Write-Output "Total de atualizações pendentes: $($result.Count)"
+                    foreach ($title in $result.Titles) {
+                        Write-Output " - $title"
+                    }
+                } else {
+                    Write-Output "O servidor está totalmente atualizado!"
+                }
+            } else {
+                Stop-Job $job
+                Remove-Job $job
+                Write-Output "AVISO: Consulta ao Windows Update excedeu o tempo limite (Timeout de 45s)."
+            }
+        } catch {
+            Write-Output "Erro ao consultar Windows Update: $_"
+        }
+      register: updates_status
+      ignore_errors: yes
+
+    - name: Exibir Relatório de Updates
+      ansible.builtin.debug:
+        msg: "{{ updates_status.stdout_lines }}"
+      when: updates_status is succeeded and updates_status.stdout_lines is defined
