@@ -1,0 +1,45 @@
+---
+- name: Corrigir e Reiniciar o Windows Exporter
+  hosts: all
+  gather_facts: no
+  
+  # Processa em lotes de 10 máquinas para não sobrecarregar a rede
+  serial: 10
+  
+  # Timeout rápido para evitar travamentos em hosts offline
+  timeout: 20
+
+  tasks:
+    - name: Garantir que a pasta temporária existe
+      ansible.windows.win_file:
+        path: 'C:\temp'
+        state: directory
+      ignore_errors: yes
+
+    - name: Copiar o instalador MSI para o servidor
+      ansible.windows.win_copy:
+        src: 'windows_exporter.msi'
+        dest: 'C:\temp\windows_exporter.msi'
+      ignore_errors: yes
+
+    - name: Instalar ou Atualizar o Windows Exporter via Msiexec
+      ansible.windows.win_shell: |
+        Start-Process msiexec.exe -ArgumentList '/i C:\temp\windows_exporter.msi /qn ENABLED_COLLECTORS="cpu,memory,logical_disk,os,system,updates"' -Wait -NoNewWindow
+      ignore_errors: yes
+
+    - name: Garantir porta 9182 aberta no Firewall do Windows
+      ansible.windows.win_shell: |
+        $ruleName = "Prometheus Windows Exporter"
+        $rule = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
+        if (-null -eq $rule) {
+            New-NetFirewallRule -DisplayName $ruleName -Name $ruleName -Direction Inbound -Protocol TCP -LocalPort 9182 -Action Allow
+        } else {
+            Set-NetFirewallRule -Name $ruleName -Enabled True -Action Allow
+        }
+      ignore_errors: yes
+
+    - name: Reiniciar o serviço do Windows Exporter para forçar conexão
+      ansible.windows.win_service:
+        name: windows_exporter
+        state: restarted
+      ignore_errors: yes
